@@ -1,4 +1,6 @@
+import { Card } from "@/components/ui/card";
 import "./App.css"
+import { Selector } from "./selector";
 function App(){
   return(
 
@@ -9,20 +11,27 @@ function App(){
         font-bold mb-5 text-center">
         Welcome to the Loader app
        </h2>
-   <div className=" bg-amber-400
-    h-[80vh] w-[80vw] p-20 ml-20 mr-20
-     flex rounded-lg shadow-lg
+   <div className="
+    h-[80vh] w-[80vw] p-20 ml-20 mr-20 flex-col gap-8
+     flex border-gray-700 border
     ">
-       
+       <div className="UrlContainer flex flex-row ">
         <input type="text" placeholder=" Insert url here"  primary-font
          className="h-10 p-2
           w-150 border border-gray-700
         focus:outline-2 focus:border-gray-500
-        rounded-md"></input>
-        <button className="ml-2 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded h-10">
-          Submit
+        "></input>
+        <button className="ml-2 bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 rounded h-10">
+          Fetch
         </button>
+       </div>
         
+        <Selector/>
+        <Card className="preview-container secondary-color rounded-none h-50"></Card>
+        
+        <button className="ml-2 bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 rounded h-10">
+          Download
+        </button>
       </div>
 </div>
 
