@@ -1,0 +1,21 @@
+@font-face {
+  font-family: 'CustomFont';
+  src: url('../assets/fonts/Micuale-Black.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}
+
+.custom-font {
+  font-family: 'CustomFont', sans-serif;
+}
+
+.app-body{
+  font-family: sans-serif;
+  font-weight: 700;
+  background-color: #F9FBFF;
+}
+.shade{
+  background-color: #BDBEC0;
+}
+
+
