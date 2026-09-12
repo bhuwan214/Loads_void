@@ -8,30 +8,43 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-const items = [
-  { label: "Select desired quality", value:null },
-  { label: "1080p", value: "21", default: true },
-  { label: "720p", value: "18" },
-  { label: "480p", value: "15" },
-  { label: "240p", value: "12" },
-
-]
-
-export function Selector() {
+export function Selector({
+  formats = [],
+  value,
+  onChange,
+  disabled,
+}) {
   return (
-    <Select items={items}>
-      <SelectTrigger className="w-50 sm:ml-0 ml-3
-        rounded-none">
-        <SelectValue />
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger className="w-50 sm:ml-0 ml-3 rounded-none">
+        <SelectValue placeholder="Select quality" />
       </SelectTrigger>
       <SelectContent>
         <SelectGroup>
           <SelectLabel>Select Quality</SelectLabel>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
+          {formats.length === 0 ? (
+            <SelectItem value="no-quality" disabled>
+              No quality available
             </SelectItem>
-          ))}
+          ) : (
+            formats.map((format) => {
+              const label =
+                format.height || format.resolution
+                  ? `${format.height || format.resolution}p`
+                  : format.format_id;
+
+              return (
+                <SelectItem key={format.format_id} value={format.format_id}>
+                  {label}
+                  {" - "}
+                  {format.ext}
+                  {format.filesize
+                    ? ` - ${Math.round(format.filesize / 1024 / 1024)} MB`
+                    : ""}
+                </SelectItem>
+              );
+            })
+          )}
         </SelectGroup>
       </SelectContent>
     </Select>
