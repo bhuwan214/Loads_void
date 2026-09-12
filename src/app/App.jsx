@@ -175,12 +175,13 @@ function App() {
         </h2>
 
         <div
-          className="
+          className="container-box
             w-[90vw]
             sm:w-[80vw]
-            pt-20
+            max-w-5xl
+            pt-10
             px-5
-            h-[80vh]
+h-[85vh]
             flex-col
             sm:gap-8
             gap-6
@@ -189,6 +190,7 @@ function App() {
             border-gray-700
             border
             sm:items-center
+            box-border
           "
         >
           {/* URL */}
@@ -245,31 +247,28 @@ function App() {
           disabled={!videoInfo || downloading}
           />
 
-          <Card
-            className="preview-container secondary-color rounded-none aspect-video w-[90%] sm:w-[50%] mx-4
-         flex justify-center items-center"
-          >
-            <CardContent className="flex flex-col justify-center items-center">
-             {videoInfo?.thumbnail ?(
-              <img
-                src={videoInfo.thumbnail}
-                alt="Video Thumbnail"
-                className="w-full h-full object-contain"
-              />
-             )
-             :(
-               <>
-                  <h3 className="text-lg font-bold mb-2">Preview</h3>
-
-                  <p className="text-sm text-gray-600 text-center">
-                    {videoInfo
-                      ? videoInfo.title
-                      : "Video preview will be displayed here."}
-                  </p>
-                </>
-             )}
-            </CardContent>
-          </Card>
+          <div className="flex w-full justify-center">
+            <Card className="preview-card secondary-color w-full max-w-100 rounded-none bg-amber-500 overflow-hidden">
+              <CardContent className="h-full w-full p-0">
+                {videoInfo?.thumbnail ? (
+                  <img
+                    src={videoInfo.thumbnail}
+                    alt="Video Thumbnail"
+                    className="preview-image"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center">
+                    <h3 className="mb-2 text-lg font-bold">Preview</h3>
+                    <p className="text-sm text-gray-600">
+                      {videoInfo
+                        ? videoInfo.title
+                        : "Video preview will be displayed here."}
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
 
              {/* Progress */}
