@@ -20,7 +20,8 @@ const items = [
 export function Selector() {
   return (
     <Select items={items}>
-      <SelectTrigger className="w-full max-w-48 rounded-none">
+      <SelectTrigger className="w-50 sm:ml-0 ml-3
+        rounded-none">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
