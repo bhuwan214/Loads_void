@@ -9,11 +9,11 @@ import {
 } from "@/components/ui/select"
 
 const items = [
-//   { label: "Select desired quality", value:null },
-  { label: "1080", value: "21" },
-  { label: "720", value: "18" },
-  { label: "480", value: "15" },
-  { label: "240", value: "12" },
+  { label: "Select desired quality", value:null },
+  { label: "1080p", value: "21", default: true },
+  { label: "720p", value: "18" },
+  { label: "480p", value: "15" },
+  { label: "240p", value: "12" },
 
 ]
 

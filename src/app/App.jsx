@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { Card,CardContent } from "@/components/ui/card";
 import "./App.css"
 import { Selector } from "./selector";
 function App(){
@@ -27,7 +27,12 @@ function App(){
        </div>
         
         <Selector/>
-        <Card className="preview-container secondary-color rounded-none h-50"></Card>
+        <Card className="preview-container secondary-color rounded-none h-50 flex justify-center items-center">
+          <CardContent className="flex flex-col justify-center items-center">
+            <h3 className="text-lg font-bold mb-2">Preview</h3>
+            <p className="text-sm text-gray-600">Video preview will be displayed here.</p>
+          </CardContent>
+        </Card>
         
         <button className="ml-2 bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 rounded h-10">
           Download
