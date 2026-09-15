@@ -49,3 +49,12 @@
   min-height: auto;
   overflow: hidden;
 }
+
+/* Settings button styling */
+.settings-btn {
+  transition: all 0.2s ease-in-out;
+}
+
+.settings-btn:hover {
+  transform: rotate(20deg);
+}
