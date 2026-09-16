@@ -198,11 +198,13 @@ function findDownloadedFile(jobDir, type = "video"){
 
 async function getFormats(url) {
   return new Promise((resolve, reject) => {
+    const platformArgs = getPlatformArgs(url);
     const args = [
       "--dump-single-json",
       "--no-playlist",
       "--no-warnings",
       "--skip-download",
+      ...platformArgs,
       url,
     ];
 
@@ -484,11 +486,17 @@ app.post("/api/download", async (req, res) => {
     // Start download
     // ---------------------------------------------
 
+    const selectedHasVideo =
+      (typeof format.vcodec === "string" && format.vcodec !== "none") ||
+      typeof format.height === "number" ||
+      typeof format.width === "number";
+
     downloadMedia({
       jobId,
       url,
       formatId,
       type,
+      selectedHasVideo,
       hasAudio:
         format.acodec &&
         format.acodec !== "none",
@@ -516,11 +524,19 @@ function downloadMedia({
   formatId,
   type,
   hasAudio,
+  selectedHasVideo = true,
 }) {
   const job = jobs.get(jobId);
 
   if (!job) {
     return;
+  }
+
+  const platform = detectPlatform(url);
+  const platformArgs = getPlatformArgs(url);
+
+  if (platform !== "generic") {
+    console.log(`[${jobId}] Detected platform: ${platform}`);
   }
 
   const args = [
@@ -534,6 +550,8 @@ function downloadMedia({
 
     "-N",
     String(MAX_CONCURRENT_FRAGMENTS),
+
+    ...platformArgs,
 
     "-P",
     job.jobDir,
@@ -554,7 +572,7 @@ function downloadMedia({
   // ------------------------------------------------
 
   if (type === "video") {
-    if (hasAudio) {
+    if (selectedHasVideo && hasAudio) {
       /*
         The selected format already contains audio.
 
@@ -567,16 +585,11 @@ function downloadMedia({
         "-f",
         formatId
       );
-    } else {
+    } else if (selectedHasVideo) {
       /*
         Selected format is video-only.
 
         We need audio too.
-
-        IMPORTANT:
-        We construct this ourselves rather than
-        allowing the client to submit an arbitrary
-        yt-dlp expression.
       */
 
       args.push(
@@ -588,12 +601,20 @@ function downloadMedia({
         "--merge-output-format",
         "mp4"
       );
-
-      // Optimize MP4 for streaming - moves moov atom to start
-      // This enables instant seeking and smooth playback in VLC
+    } else {
+      /*
+        Instagram/TikTok often expose audio-only entries as the only
+        downloadable stream. For video mode, fall back to a true
+        video+audio selection instead of downloading an mp4a track.
+      */
       args.push(
-        "--postprocessor-args",
-        "ffmpeg:-c copy -movflags +faststart"
+        "-f",
+        "bestvideo+bestaudio/best"
+      );
+
+      args.push(
+        "--merge-output-format",
+        "mp4"
       );
     }
   }
@@ -1021,3 +1042,47 @@ app.listen(PORT, () => {
     );
   }
 });
+
+
+function detectPlatform(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
+
+    if (hostname.includes("instagram.com")) {
+      return "instagram";
+    }
+
+    if (hostname.includes("tiktok.com")) {
+      return "tiktok";
+    }
+
+    return "generic";
+  } catch {
+    return "generic";
+  }
+}
+
+function getPlatformArgs(url) {
+  const platform = detectPlatform(url);
+  const args = [];
+
+  if (platform === "instagram") {
+    args.push(
+      "--add-header",
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    );
+    args.push(
+      "--add-header",
+      "Referer: https://www.instagram.com/"
+    );
+  }
+
+  if (platform === "tiktok") {
+    args.push(
+      "--add-header",
+      "Referer: https://www.tiktok.com/"
+    );
+  }
+
+  return args;
+}
