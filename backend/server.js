@@ -648,7 +648,7 @@ function downloadMedia({
     `[${jobId}] Starting yt-dlp`
   );
 
-  const process = spawn(
+  const childProcess = spawn(
     YT_DLP_PATH,
     args,
     {
@@ -657,6 +657,7 @@ function downloadMedia({
     }
   );
 
+  job.childProcess = childProcess;
   job.status = "downloading";
 
   let stderrOutput = "";
@@ -665,7 +666,7 @@ function downloadMedia({
   // stdout
   // ------------------------------------------------
 
-  process.stdout.on("data", (data) => {
+  childProcess.stdout.on("data", (data) => {
     const lines = data
       .toString()
       .split(/\r?\n/);
@@ -697,7 +698,7 @@ function downloadMedia({
   // stderr
   // ------------------------------------------------
 
-  process.stderr.on("data", (data) => {
+  childProcess.stderr.on("data", (data) => {
     const text = data.toString();
 
     stderrOutput += text;
@@ -725,11 +726,15 @@ function downloadMedia({
   // Process error
   // ------------------------------------------------
 
-  process.on("error", (error) => {
+  childProcess.on("error", (error) => {
     console.error(
       `[${jobId}] Process error:`,
       error.message
     );
+
+    if (job.status === "cancelled") {
+      return;
+    }
 
     job.status = "error";
 
@@ -743,10 +748,17 @@ function downloadMedia({
   // Process finished
   // ------------------------------------------------
 
-  process.on("close", (code) => {
+  childProcess.on("close", (code) => {
     console.log(
       `[${jobId}] yt-dlp exited with code ${code}`
     );
+
+    job.childProcess = null;
+
+    if (job.status === "cancelled") {
+      cleanupJobLater(jobId);
+      return;
+    }
 
     if (code !== 0) {
       job.status = "error";
@@ -804,6 +816,42 @@ function downloadMedia({
   });
 }
 
+
+app.post("/api/cancel/:jobId", (req, res) => {
+  const { jobId } = req.params;
+
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return res.status(404).json({
+      error: "Job not found.",
+    });
+  }
+
+  if (
+    job.status === "completed" ||
+    job.status === "error" ||
+    job.status === "cancelled"
+  ) {
+    return res.json({
+      status: job.status,
+    });
+  }
+
+  job.status = "cancelled";
+  job.progress = 0;
+  job.error = null;
+
+  if (job.childProcess && !job.childProcess.killed) {
+    job.childProcess.kill();
+  }
+
+  cleanupJobLater(jobId);
+
+  return res.json({
+    status: "cancelled",
+  });
+});
 
 app.get(
   "/api/status/:jobId",

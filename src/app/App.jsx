@@ -1,14 +1,24 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import "./App.css";
 import { Selector } from "./selector";
 import { SettingsDialog } from "./SettingsDialog";
 import { getSettings } from "./settingsStore";
 
+const API = "http://localhost:3000";
+const SLOW_LOAD_MS = 450;
+
+function PreviewSkeleton() {
+  return (
+    <div className="preview-skeleton skeleton-pulse" aria-hidden="true">
+      <div className="preview-skeleton-thumb" />
+      <div className="preview-skeleton-line" />
+      <div className="preview-skeleton-line short" />
+    </div>
+  );
+}
+
 function App() {
-
-  const API = "http://localhost:3000";
-
   const [url, setUrl] = useState("");
   const [videoInfo, setVideoInfo] = useState(null);
   const [selectedFormat, setSelectedFormat] = useState("");
@@ -18,6 +28,74 @@ function App() {
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState(getSettings());
+  const [showFetchSkeleton, setShowFetchSkeleton] = useState(false);
+  const [showDownloadSkeleton, setShowDownloadSkeleton] = useState(false);
+
+  const fetchAbortRef = useRef(null);
+  const pollIntervalRef = useRef(null);
+  const activeJobIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setShowFetchSkeleton(false);
+      return;
+    }
+
+    const timer = setTimeout(() => setShowFetchSkeleton(true), SLOW_LOAD_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  useEffect(() => {
+    if (!downloading) {
+      setShowDownloadSkeleton(false);
+      return;
+    }
+
+    const timer = setTimeout(() => setShowDownloadSkeleton(true), SLOW_LOAD_MS);
+    return () => clearTimeout(timer);
+  }, [downloading]);
+
+  useEffect(() => {
+    return () => {
+      fetchAbortRef.current?.abort();
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const stopDownloadPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  const handleCancelFetch = () => {
+    fetchAbortRef.current?.abort();
+    fetchAbortRef.current = null;
+    setLoading(false);
+    setShowFetchSkeleton(false);
+  };
+
+  const handleCancelDownload = async () => {
+    stopDownloadPolling();
+
+    const jobId = activeJobIdRef.current;
+    activeJobIdRef.current = null;
+
+    if (jobId) {
+      try {
+        await fetch(`${API}/api/cancel/${jobId}`, { method: "POST" });
+      } catch {
+        // Best-effort cancel; UI still resets locally.
+      }
+    }
+
+    setDownloading(false);
+    setProgress(0);
+    setShowDownloadSkeleton(false);
+  };
 
   // --------------------------------
   // Fetch video information
@@ -39,6 +117,10 @@ function App() {
       return;
     }
 
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
     setLoading(true);
 
     try {
@@ -50,6 +132,7 @@ function App() {
         body: JSON.stringify({
           url: url.trim(),
         }),
+        signal: controller.signal,
       });
 
       const data = await response.json();
@@ -60,7 +143,6 @@ function App() {
 
       setVideoInfo(data);
 
-      // Try to select the saved default mode/quality
       if (data.formats?.length > 0) {
         if (settings.downloadType === "audio") {
           const audioFormat = data.formats.find(
@@ -86,8 +168,14 @@ function App() {
         setError("No video qualities were found for this URL.");
       }
     } catch (err) {
+      if (err.name === "AbortError") {
+        return;
+      }
       setError(err.message || "Something went wrong.");
     } finally {
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null;
+      }
       setLoading(false);
     }
   };
@@ -121,7 +209,7 @@ function App() {
         body: JSON.stringify({
           url: url.trim(),
           formatId: selectedFormat,
-          type: settings.downloadType, // Use setting: "video" or "audio"
+          type: settings.downloadType,
         }),
       });
 
@@ -131,20 +219,22 @@ function App() {
         throw new Error(data.error || "Download could not be started.");
       }
 
-      const jobId = data.jobId;
-
-      await monitorDownload(jobId);
+      activeJobIdRef.current = data.jobId;
+      monitorDownload(data.jobId);
     } catch (err) {
       setError(err.message || "Download failed.");
       setDownloading(false);
+      activeJobIdRef.current = null;
     }
   };
 
   // --------------------------------
   // Monitor download progress
   // --------------------------------
-  const monitorDownload = async (jobId) => {
-    const interval = setInterval(async () => {
+  const monitorDownload = (jobId) => {
+    stopDownloadPolling();
+
+    pollIntervalRef.current = setInterval(async () => {
       try {
         const response = await fetch(`${API}/api/status/${jobId}`);
 
@@ -157,11 +247,10 @@ function App() {
         setProgress(data.progress || 0);
 
         if (data.status === "completed") {
-          clearInterval(interval);
-
+          stopDownloadPolling();
+          activeJobIdRef.current = null;
           setDownloading(false);
 
-          // Automatically download the completed file
           const link = document.createElement("a");
           link.href = `${API}/api/file/${jobId}`;
           link.download = data.filename || "video.mp4";
@@ -173,38 +262,51 @@ function App() {
           return;
         }
 
-        if (data.status === "error") {
-          clearInterval(interval);
-
+        if (data.status === "cancelled") {
+          stopDownloadPolling();
+          activeJobIdRef.current = null;
           setDownloading(false);
+          setProgress(0);
+          return;
+        }
 
+        if (data.status === "error") {
+          stopDownloadPolling();
+          activeJobIdRef.current = null;
+          setDownloading(false);
           setError(data.error || "Download failed.");
         }
       } catch (err) {
-        clearInterval(interval);
-
+        stopDownloadPolling();
+        activeJobIdRef.current = null;
         setDownloading(false);
         setError(err.message || "Unable to monitor download.");
       }
     }, 1000);
   };
 
+  const previewBusy = loading || (downloading && showDownloadSkeleton);
+
   return (
     <div className="app-body">
-      <div className="main_box w-full flex flex-col justify-center items-center">
-        {/* Header with Title and Settings Button */}
-        <div className="w-full flex justify-between items-center px-5 pt-6">
-          <h2 className="text-3xl custom-font font-bold text-center flex-1">
-            Welcome to the Loader app
-          </h2>
-          
-          {/* Settings Button */}
+      <div className="app-shell">
+        <header className="app-header">
+          <div className="app-header-main">
+            <h2 className="app-title custom-font font-bold">
+              Welcome to the Loader app
+            </h2>
+            <p className="app-tagline">
+              A solution to download from multiple websites in one go—paste a
+              link, pick your format, and save video or audio locally.
+            </p>
+          </div>
+
           <button
             onClick={() => {
               setSettings(getSettings());
               setSettingsOpen(true);
             }}
-            className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-200 transition-colors"
+            className="settings-btn flex shrink-0 items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full hover:bg-gray-200 transition-colors"
             title="Settings"
           >
             <svg
@@ -228,95 +330,70 @@ function App() {
               />
             </svg>
           </button>
-        </div>
+        </header>
 
-        <div
-          className="container-box
-            w-[90vw]
-            sm:w-[80vw]
-            max-w-5xl
-            pt-10
-            px-5
-            h-[85vh]
-            flex-col
-            sm:gap-8
-            gap-6
-            pb-20
-            flex
-            border-gray-700
-            border
-            sm:items-center
-            box-border
-          "
-        >
-          {/* URL */}
-          <div
-            className="
-              UrlContainer
-              flex
-              flex-col
-              sm:flex-row
-              gap-4
-              items-center
-              sm:gap-5
-              justify-center
-              sm:w-[50%]
-            "
-          >
+        <div className="container-box">
+          <div className="form-row flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center justify-center">
             <input
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !loading && !downloading) {
                   handleFetch();
                 }
               }}
               placeholder="Insert URL here"
-              className="
-                h-10
-                p-2
-                w-full
-                border
-                border-gray-700
-                sm:w-150
-                focus:outline-2
-                focus:border-gray-500
-              "
+              className="h-10 min-w-0 flex-1 p-2 w-full border border-gray-700 focus:outline-2 focus:border-gray-500"
               disabled={loading || downloading}
             />
-            
-            <button
-              onClick={handleFetch}
-              disabled={loading || downloading}
-              className=" bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 h-10 w-[95%] sm:w-30 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Fetching...": "Fetch"}
 
-            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={handleCancelFetch}
+                className="bg-red-700 hover:bg-red-800 rounded-none text-white font-bold py-2 px-4 h-10 w-full sm:w-28 shrink-0"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleFetch}
+                disabled={downloading}
+                className="bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 h-10 w-full sm:w-28 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Fetch
+              </button>
+            )}
           </div>
 
-          <Selector 
-          formats= { videoInfo?.formats || []}
-          value={selectedFormat}
-          onChange= {setSelectedFormat}
-          disabled={!videoInfo || downloading}
-          mode={settings.downloadType}
-          />
+          <div className="form-row">
+            <Selector
+              formats={videoInfo?.formats || []}
+              value={selectedFormat}
+              onChange={setSelectedFormat}
+              disabled={!videoInfo || downloading || loading}
+              mode={settings.downloadType}
+            />
+          </div>
 
-          <div className="flex w-full justify-center">
-            <Card className="preview-card secondary-color w-full max-w-100 rounded-none bg-amber-500 overflow-hidden">
+          <div className="preview-section">
+            <Card className="preview-card secondary-color rounded-none bg-amber-500 overflow-hidden">
               <CardContent className="h-full w-full p-0">
-                {videoInfo?.thumbnail ? (
+                {loading && showFetchSkeleton ? (
+                  <PreviewSkeleton />
+                ) : previewBusy && !videoInfo?.thumbnail ? (
+                  <PreviewSkeleton />
+                ) : videoInfo?.thumbnail ? (
                   <img
                     src={videoInfo.thumbnail}
                     alt="Video Thumbnail"
                     className="preview-image"
                   />
                 ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center px-4 text-center">
-                    <h3 className="mb-2 text-lg font-bold">Preview</h3>
-                    <p className="text-sm text-gray-600">
+                  <div className="preview-placeholder">
+                    <h3 className="font-bold">Preview</h3>
+                    <p className="text-gray-600">
                       {videoInfo
                         ? videoInfo.title
                         : "Video preview will be displayed here."}
@@ -327,50 +404,61 @@ function App() {
             </Card>
           </div>
 
-
-             {/* Progress */}
           {downloading && (
-            <div className="w-[95%] sm:w-[50%]">
-              <div className="w-full bg-gray-300 h-3">
-                <div
-                  className="bg-gray-950 h-3 transition-all"
-                  style={{
-                    width: `${progress}%`,
-                  }}
-                />
-              </div>
+            <div className="form-row">
+              {showDownloadSkeleton && progress === 0 ? (
+                <div className="progress-skeleton skeleton-pulse" aria-hidden="true" />
+              ) : (
+                <div className="w-full bg-gray-300 h-3">
+                  <div
+                    className="bg-gray-950 h-3 transition-all"
+                    style={{
+                      width: `${progress}%`,
+                    }}
+                  />
+                </div>
+              )}
 
               <p className="text-sm mt-2 text-center">
-                Downloading {progress}%
+                {showDownloadSkeleton && progress === 0
+                  ? "Starting download…"
+                  : `Downloading ${progress}%`}
               </p>
             </div>
           )}
 
-             {/* Error */}
           {error && (
-            <p className="text-red-600 text-sm text-center">
-              {error}
-            </p>
+            <p className="form-row text-red-600 text-sm text-center">{error}</p>
           )}
 
-          <button
-          onClick={handleDownload}
-          disabled={!videoInfo || downloading}
-            className="ml-2 bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 w-[95%] sm:w-[50%]
-         h-10"
-          >
-           {downloading ?"Downloading": "Download"}
-          </button>
+          <div className="action-row flex gap-2">
+            <button
+              onClick={handleDownload}
+              disabled={!videoInfo || downloading || loading}
+              className="flex-1 bg-gray-950 hover:bg-gray-900 rounded-none text-white font-bold py-2 px-4 h-10 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {downloading ? "Downloading" : "Download"}
+            </button>
+
+            {downloading && (
+              <button
+                type="button"
+                onClick={handleCancelDownload}
+                className="bg-red-700 hover:bg-red-800 rounded-none text-white font-bold py-2 px-4 h-10 shrink-0"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Settings Dialog */}
-      <SettingsDialog 
-        isOpen={settingsOpen} 
+      <SettingsDialog
+        isOpen={settingsOpen}
         onClose={() => {
           setSettings(getSettings());
           setSettingsOpen(false);
-        }} 
+        }}
       />
     </div>
   );

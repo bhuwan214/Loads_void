@@ -39,7 +39,7 @@ export function Selector({
 
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger className="w-50 sm:ml-0 ml-3 rounded-none">
+      <SelectTrigger className="w-full rounded-none">
         <SelectValue placeholder={mode === "audio" ? "Select audio format" : "Select quality"} />
       </SelectTrigger>
       <SelectContent>
