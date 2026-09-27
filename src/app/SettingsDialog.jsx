@@ -9,7 +9,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -31,11 +30,6 @@ export function SettingsDialog({ isOpen, onClose }) {
 
   const handleQualityChange = (value) => {
     setSettings((prev) => ({ ...prev, defaultQuality: value }));
-    setHasChanges(true);
-  };
-
-  const handlePathChange = (e) => {
-    setSettings((prev) => ({ ...prev, defaultDownloadPath: e.target.value }));
     setHasChanges(true);
   };
 
@@ -92,29 +86,6 @@ export function SettingsDialog({ isOpen, onClose }) {
             </Select>
             <p className="text-xs text-gray-500">
               Select the default video quality for downloads
-            </p>
-          </div>
-
-          <Separator className="bg-gray-200" />
-
-          {/* Default Download Path */}
-          <div className="space-y-3">
-            <Label
-              htmlFor="downloadPath"
-              className="text-sm font-semibold text-gray-700"
-            >
-              Default Download Path
-            </Label>
-            <Input
-              id="downloadPath"
-              type="text"
-              value={settings.defaultDownloadPath}
-              onChange={handlePathChange}
-              placeholder="e.g., /downloads or leave empty for default"
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-            <p className="text-xs text-gray-500">
-              Leave empty to use application default folder
             </p>
           </div>
 

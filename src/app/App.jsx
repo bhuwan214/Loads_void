@@ -156,7 +156,9 @@ function App() {
           const qualityHeight = parseInt(settings.defaultQuality, 10);
 
           const matchingFormat = data.formats.find(
-            (f) => f.height === qualityHeight && (f.kind === "video" || f.hasVideo)
+            (f) =>
+              f.qualityBucket === qualityHeight &&
+              (f.kind === "video" || f.hasVideo)
           );
 
           setSelectedFormat(
@@ -366,7 +368,7 @@ function App() {
               </button>
             )}
           </div>
-
+           { console.log({videoInfo})}
           <div className="form-row">
             <Selector
               formats={videoInfo?.formats || []}

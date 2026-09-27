@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
+const os = require("os");
 
 dotenv.config();
 
@@ -62,7 +63,7 @@ const MAX_CONCURRENT_FRAGMENTS =
 const MAX_DOWNLOADS_PER_IP =
   Number(process.env.MAX_DOWNLOADS_PER_IP) || 2;
 
-const DOWNLOAD_DIR = path.join(__dirname, "downloads");
+const DOWNLOAD_DIR = path.join(os.tmpdir(), "localload-temp");
 
 fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
@@ -150,6 +151,195 @@ function parseProgress(line){
         speed: match[2].trim(),
         eta: match[3].trim(),
     };
+}
+
+const UI_QUALITY_BUCKETS = [1080, 720, 480, 240];
+const MAX_FORMATS_PER_QUALITY = 2;
+const MAX_AUDIO_FORMATS = 2;
+
+function getShortSide(format) {
+  const height =
+    typeof format.height === "number" ? format.height : null;
+  const width =
+    typeof format.width === "number" ? format.width : null;
+
+  if (height === null && width === null) {
+    return null;
+  }
+
+  if (height === null) {
+    return width;
+  }
+
+  if (width === null) {
+    return height;
+  }
+
+  return Math.min(height, width);
+}
+
+function snapQualityBucket(shortSide) {
+  if (typeof shortSide !== "number" || shortSide <= 0) {
+    return null;
+  }
+
+  for (const bucket of UI_QUALITY_BUCKETS) {
+    if (shortSide >= bucket - 48) {
+      return bucket;
+    }
+  }
+
+  return null;
+}
+
+function formatSortScore(format) {
+  let score = 0;
+
+  if (format.hasVideo && format.hasAudio) {
+    score += 1_000_000;
+  } else if (format.hasVideo) {
+    score += 100_000;
+  }
+
+  if (format.filesize) {
+    score += format.filesize;
+  }
+
+  if (format.tbr) {
+    score += format.tbr * 1024;
+  }
+
+  if (format.ext === "mp4") {
+    score += 500;
+  }
+
+  if (format.vcodec && format.vcodec !== "none" && format.vcodec !== "unknown") {
+    score += 200;
+  }
+
+  return score;
+}
+
+function mapRawFormat(format, duration) {
+  const hasVideo =
+    (typeof format.vcodec === "string" && format.vcodec !== "none") ||
+    typeof format.height === "number" ||
+    typeof format.width === "number";
+
+  const hasAudio =
+    typeof format.acodec === "string" &&
+    format.acodec !== "none";
+
+  const shortSide = getShortSide(format);
+  const qualityBucket = hasVideo ? snapQualityBucket(shortSide) : null;
+
+  let filesize = format.filesize || format.filesize_approx || null;
+  if (!filesize && format.tbr && typeof duration === "number" && duration > 0) {
+    filesize = Math.round((format.tbr * 1000 / 8) * duration);
+  }
+
+  return {
+    format_id: String(format.format_id),
+    ext: format.ext,
+    height: format.height || null,
+    width: format.width || null,
+    fps: format.fps || null,
+    filesize,
+    tbr: format.tbr || null,
+    vcodec: format.vcodec,
+    acodec: format.acodec || null,
+    hasAudio,
+    hasVideo,
+    kind: hasVideo ? "video" : "audio",
+    qualityBucket,
+    qualityLabel: qualityBucket ? `${qualityBucket}p` : null,
+  };
+}
+
+function isUsableVideoFormat(format) {
+  if (!format.hasVideo) {
+    return false;
+  }
+
+  if (format.qualityBucket === null) {
+    return false;
+  }
+
+  const vcodec = format.vcodec;
+  const missingDimensions =
+    format.height === null && format.width === null;
+
+  if (missingDimensions && (vcodec === "unknown" || !vcodec)) {
+    return false;
+  }
+
+  return true;
+}
+
+function pickTopFormats(formats, maxCount) {
+  return [...formats]
+    .sort((a, b) => formatSortScore(b) - formatSortScore(a))
+    .slice(0, maxCount);
+}
+
+function buildUiFormats(rawFormats, duration) {
+  const mapped = (rawFormats || [])
+    .filter((format) => {
+      const hasVideoCodec =
+        typeof format.vcodec === "string" &&
+        format.vcodec !== "none";
+
+      const hasVideoDimensions =
+        typeof format.height === "number" ||
+        typeof format.width === "number";
+
+      const hasAudioCodec =
+        typeof format.acodec === "string" &&
+        format.acodec !== "none";
+
+      return hasVideoCodec || hasVideoDimensions || hasAudioCodec;
+    })
+    .map((f) => mapRawFormat(f, duration))
+    .filter(
+      (format, index, array) =>
+        index ===
+        array.findIndex((item) => item.format_id === format.format_id)
+    );
+
+  const videoCandidates = mapped.filter(isUsableVideoFormat);
+  const byBucket = new Map();
+
+  for (const format of videoCandidates) {
+    const bucket = format.qualityBucket;
+    const list = byBucket.get(bucket) || [];
+    list.push(format);
+    byBucket.set(bucket, list);
+  }
+
+  const curatedVideo = [];
+
+  for (const bucket of UI_QUALITY_BUCKETS) {
+    const group = byBucket.get(bucket);
+
+    if (!group?.length) {
+      continue;
+    }
+
+    curatedVideo.push(...pickTopFormats(group, MAX_FORMATS_PER_QUALITY));
+  }
+
+  curatedVideo.sort(
+    (a, b) =>
+      (b.qualityBucket || 0) - (a.qualityBucket || 0) ||
+      formatSortScore(b) - formatSortScore(a)
+  );
+
+  const audioCandidates = mapped.filter(
+    (format) => format.hasAudio && !format.hasVideo
+  );
+  const curatedAudio = pickTopFormats(audioCandidates, MAX_AUDIO_FORMATS);
+
+  return [...curatedVideo, ...curatedAudio];
 }
 
 // Find downloaded file
@@ -266,71 +456,8 @@ app.post("/api/info", async (req, res) => {
     }
 
     const info = await getFormats(url);
-    console.log(info);
 
-    const formats = (info.formats || [])
-      .filter((format) => {
-        // Some sources omit vcodec for otherwise valid video entries,
-        // especially on adaptive stream formats. Keep entries that still
-        // expose a height/width or a video codec, and also keep audio-only
-        // formats so audio downloads can be selected correctly.
-        const hasVideoCodec =
-          typeof format.vcodec === "string" &&
-          format.vcodec !== "none";
-
-        const hasVideoDimensions =
-          typeof format.height === "number" ||
-          typeof format.width === "number";
-
-        const hasAudioCodec =
-          typeof format.acodec === "string" &&
-          format.acodec !== "none";
-
-        return hasVideoCodec || hasVideoDimensions || hasAudioCodec;
-      })
-      .map((format) => {
-        const hasVideo =
-          (typeof format.vcodec === "string" && format.vcodec !== "none") ||
-          typeof format.height === "number" ||
-          typeof format.width === "number";
-
-        const hasAudio =
-          typeof format.acodec === "string" &&
-          format.acodec !== "none";
-
-        return {
-          format_id: String(format.format_id),
-
-          ext: format.ext,
-
-          height: format.height || null,
-
-          width: format.width || null,
-
-          fps: format.fps || null,
-
-          filesize: format.filesize || format.filesize_approx || null,
-
-          vcodec: format.vcodec,
-
-          acodec: format.acodec || null,
-
-          hasAudio,
-
-          hasVideo,
-
-          kind: hasVideo ? "video" : "audio",
-        };
-      })
-      // Remove duplicate resolutions
-      .filter(
-        (format, index, array) =>
-          index ===
-          array.findIndex(
-            (item) =>
-              item.format_id === format.format_id
-          )
-      );
+    const formats = buildUiFormats(info.formats, info.duration);
 
     return res.json({
       title: info.title || "Unknown",
@@ -809,10 +936,10 @@ function downloadMedia({
       `[${jobId}] Completed: ${job.filename}`
     );
 
-    // Keep completed job for 1 hour
+    // Safety timeout: clean up temporary file after 5 minutes if not downloaded
     setTimeout(() => {
       cleanupJob(jobId);
-    }, 60 * 60 * 1000);
+    }, 5 * 60 * 1000);
   });
 }
 
@@ -975,6 +1102,11 @@ app.get(
         }
       });
 
+      res.on("finish", () => {
+        // Delete temporary file and job folder immediately after file is delivered to device
+        cleanupJob(jobId);
+      });
+
       stream.pipe(res);
     } else {
       res.setHeader("Content-Length", fileSize);
@@ -986,6 +1118,11 @@ app.get(
         if (!res.headersSent) {
           res.status(500).json({ error: "Stream error." });
         }
+      });
+
+      res.on("finish", () => {
+        // Delete temporary file and job folder immediately after file is delivered to device
+        cleanupJob(jobId);
       });
 
       stream.pipe(res);

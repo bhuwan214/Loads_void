@@ -3,7 +3,6 @@ const SETTINGS_KEY = "loaderAppSettings";
 
 const DEFAULT_SETTINGS = {
   defaultQuality: "720p",
-  defaultDownloadPath: "",
   downloadType: "video", // "video" or "audio"
 };
 
